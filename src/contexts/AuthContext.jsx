@@ -6,27 +6,22 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const fetchProfile = useCallback(async (userId) => {
     if (!userId) return null
     
     try {
-      // Add a 15 second timeout to prevent infinite loading if DB hangs
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout fetching profile')), 15000))
-      const profilePromise = supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
       
-      const { data, error } = await Promise.race([profilePromise, timeoutPromise])
-
       if (error) {
         console.error('[Auth] Erreur chargement profil:', error.message)
         return null
       }
-      console.log('[Auth] Profil chargé avec succès:', data?.email)
       return data
     } catch (err) {
-      console.error('[Auth] Timeout ou erreur fatale:', err.message)
+      console.error('[Auth] Erreur fatale fetchProfile:', err.message)
       return null
     }
   }, [])
@@ -34,55 +29,46 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    const initSession = async () => {
+    // 1. Vérification initiale de la session
+    const checkInitialSession = async () => {
       try {
-        console.log('[Auth] initSession démarré')
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout getting session')), 15000))
-        const sessionPromise = supabase.auth.getSession()
+        console.log('[Auth] Vérification initiale de la session...')
+        const { data: { session }, error } = await supabase.auth.getSession()
         
-        const { data: { session }, error } = await Promise.race([sessionPromise, timeoutPromise])
         if (error) throw error
         
-        console.log('[Auth] Session récupérée:', session?.user?.email || 'Aucune')
-        if (!mounted) return
-
-        if (session?.user) {
-          setUser(session.user)
-          console.log('[Auth] Appel de fetchProfile depuis initSession')
-          const p = await fetchProfile(session.user.id)
-          if (mounted) setProfile(p)
+        if (mounted) {
+          if (session?.user) {
+            setUser(session.user)
+            console.log('[Auth] Session trouvée:', session.user.email)
+            const p = await fetchProfile(session.user.id)
+            setProfile(p)
+          } else {
+            console.log('[Auth] Aucune session trouvée au démarrage')
+            setUser(null)
+            setProfile(null)
+          }
         }
       } catch (err) {
-        console.error('[Auth] Erreur initSession:', err.message)
-        if (mounted) setError(err.message)
+        console.error('[Auth] Erreur initialisation:', err.message)
       } finally {
-        if (mounted) setLoading(false)
+        if (mounted) setIsLoading(false)
       }
     }
 
-    initSession()
+    checkInitialSession()
 
+    // 2. Écouteur des changements d'état d'auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[Auth] onAuthStateChange event:', event)
+      console.log('[Auth] Nouvel événement auth:', event)
+      
       if (!mounted) return
-
-      // Prevent race condition with getSession on initial load
-      if (event === 'INITIAL_SESSION') return
-
-      if (event === 'SIGNED_OUT') {
-        console.log('[Auth] Utilisateur déconnecté')
-        setUser(null)
-        setProfile(null)
-        setLoading(false)
-        return
-      }
 
       if (session?.user) {
         setUser(session.user)
         
-        // Only fetch profile on explicit SIGNED_IN event.
-        if (event === 'SIGNED_IN') {
-          console.log('[Auth] Appel de fetchProfile depuis SIGNED_IN')
+        // On récupère le profil si l'utilisateur change ou se connecte
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           const p = await fetchProfile(session.user.id)
           if (mounted) setProfile(p)
         }
@@ -90,7 +76,9 @@ export function AuthProvider({ children }) {
         setUser(null)
         setProfile(null)
       }
-      if (mounted) setLoading(false)
+
+      // Pour être sûr que le chargement s'arrête sur n'importe quel événement initial
+      if (mounted) setIsLoading(false)
     })
 
     return () => {
@@ -148,7 +136,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       user,
       profile,
-      loading,
+      isLoading,
       error,
       role: profile?.role || null,
       isAdmin: profile?.role === 'admin',

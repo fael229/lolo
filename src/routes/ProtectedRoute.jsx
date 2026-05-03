@@ -13,19 +13,19 @@ function LoadingScreen() {
 }
 
 export function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth()
+  const { user, isLoading } = useAuth()
   const location = useLocation()
 
-  if (loading) return <LoadingScreen />
+  if (isLoading) return <LoadingScreen />
   if (!user) return <Navigate to="/connexion" state={{ from: location }} replace />
   return children
 }
 
 export function RoleRoute({ children, roles }) {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, isLoading } = useAuth()
   const location = useLocation()
 
-  if (loading) return <LoadingScreen />
+  if (isLoading) return <LoadingScreen />
   if (!user) return <Navigate to="/connexion" state={{ from: location }} replace />
 
   if (roles && !roles.includes(profile?.role)) {
@@ -42,9 +42,9 @@ export function RoleRoute({ children, roles }) {
 }
 
 export function PublicRoute({ children }) {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, isLoading } = useAuth()
 
-  if (loading) return <LoadingScreen />
+  if (isLoading) return <LoadingScreen />
 
   if (user && profile?.role) {
     const redirectMap = {
